@@ -30,6 +30,45 @@ This runbook documents how to configure AWS SSO, set up profiles, and use `aws e
 
 ---
 
+## 🔎 ECS Discovery
+
+1. List all clusters:
+   ```bash
+   aws ecs list-clusters --profile <profile>
+   ```
+
+2. List tasks in a cluster:
+   ```bash
+   aws ecs list-tasks --cluster <cluster-name> --profile <profile>
+   ```
+
+⚠️ Use either the **cluster name** (`pwcuat`) or the **full ARN**. Do **not** use `cluster/<name>`.
+
+---
+
+## 🚀 Exec into a Container
+
+### Alternative: Use helper script
+
+If you don’t want to manually discover clusters and tasks, use the helper script `ecs-exec.sh`.
+It will interactively let you pick the cluster and task, defaulting the container to `web`.
+
+```bash
+./ecs-exec.sh --profile <profile> --region <region>
+```
+
+Options:
+- `--cluster <cluster-name-or-arn>` (skip interactive cluster selection)
+- `--task <task-arn>` (skip interactive task selection)
+- `--shell /bin/bash` (use bash instead of sh)
+
+
+Run the command:
+
+```bash
+aws ecs execute-command   --cluster <cluster-name-or-arn>   --task <task-arn>   --container <container-name>   --command "/bin/sh"   --interactive   --region <region>   --profile <profile>
+```
+
 ### ⚡️ Shortcut: use the helper script
 
 If you don't want to manually look up clusters/tasks every time, use the helper script instead. It auto-discovers the cluster and running task and drops you straight into the `web` container.
@@ -49,31 +88,6 @@ chmod +x ./ecs-exec.sh
 
 # use bash instead of sh if the image has it
 ./ecs-exec.sh --profile <profile> --shell /bin/bash
-```
-
-## 🔎 ECS Discovery
-
-Alternatively you can go down this route if you need to find multiple different containers/ tasks
-1. List all clusters:
-   ```bash
-   aws ecs list-clusters --profile <profile>
-   ```
-
-2. List tasks in a cluster:
-   ```bash
-   aws ecs list-tasks --cluster <cluster-name> --profile <profile>
-   ```
-
-⚠️ Use either the **cluster name** (`pwcuat`) or the **full ARN**. Do **not** use `cluster/<name>`.
-
----
-
-## 🚀 Exec into a Container
-
-Run the command:
-
-```bash
-aws ecs execute-command   --cluster <cluster-name-or-arn>   --task <task-arn>   --container <container-name>   --command "/bin/sh"   --interactive   --region <region>   --profile <profile>
 ```
 
 ### Pre-requisites
@@ -147,3 +161,39 @@ session-manager-plugin --version
 - [ ] CLI version is up to date.  
 
 Once all of the above are true, `aws ecs execute-command` should drop you into a shell inside your ECS container.
+
+---
+
+## ⚠️ macOS Bash Compatibility (mapfile error)
+
+If you see:
+```
+./ecs-exec.sh: line 103: mapfile: command not found
+```
+This happens because macOS ships with Bash 3.2, which does not support `mapfile`.
+
+### Solutions
+
+1. **Use a `while read` loop** (script already supports this alternative):
+   Replace any line like:
+   ```bash
+   mapfile -t clusters < <(aws ecs list-clusters ...)
+   ```
+   with:
+   ```bash
+   clusters=()
+   while IFS= read -r line; do
+     clusters+=("$line")
+   done < <(aws ecs list-clusters ...)
+   ```
+
+   And the same for tasks.
+
+2. **Install a newer Bash** on macOS:
+   ```bash
+   brew install bash
+   /usr/local/bin/bash ecs-exec.sh --profile <profile>
+   ```
+   (On Apple Silicon, Bash is typically installed at `/opt/homebrew/bin/bash`.)
+
+Either approach resolves the error and lets the script run correctly.
