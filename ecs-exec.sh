@@ -14,7 +14,10 @@ set -euo pipefail
 #   1 - user/config error, 2 - dependency missing, 3 - AWS call failed
 
 err() { echo "ERROR: $*" >&2; }
-die() { err "$@"; exit 1; }
+die() {
+  err "$@"
+  exit 1
+}
 
 need_bin() {
   command -v "$1" >/dev/null 2>&1 || return 1
@@ -26,30 +29,54 @@ REGION=""
 CLUSTER=""
 TASK=""
 CONTAINER="web"
-SHELL="/bin/sh"
+SHELL="/bin/bash"
 
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile) PROFILE="${2:-}"; shift 2;;
-    --region) REGION="${2:-}"; shift 2;;
-    --cluster) CLUSTER="${2:-}"; shift 2;;
-    --task) TASK="${2:-}"; shift 2;;
-    --container) CONTAINER="${2:-}"; shift 2;;
-    --shell) SHELL="${2:-}"; shift 2;;
-    -h|--help)
-      sed -n '1,40p' "$0"
-      exit 0
-      ;;
-    *)
-      die "Unknown arg: $1"
-      ;;
+  --profile)
+    PROFILE="${2:-}"
+    shift 2
+    ;;
+  --region)
+    REGION="${2:-}"
+    shift 2
+    ;;
+  --cluster)
+    CLUSTER="${2:-}"
+    shift 2
+    ;;
+  --task)
+    TASK="${2:-}"
+    shift 2
+    ;;
+  --container)
+    CONTAINER="${2:-}"
+    shift 2
+    ;;
+  --shell)
+    SHELL="${2:-}"
+    shift 2
+    ;;
+  -h | --help)
+    sed -n '1,40p' "$0"
+    exit 0
+    ;;
+  *)
+    die "Unknown arg: $1"
+    ;;
   esac
 done
 
 [[ -n "$PROFILE" ]] || die "Provide --profile <name> (SSO or static profile)."
-need_bin aws || { err "aws CLI v2 is required."; exit 2; }
-need_bin jq  || { err "jq is required."; exit 2; }
+need_bin aws || {
+  err "aws CLI v2 is required."
+  exit 2
+}
+need_bin jq || {
+  err "jq is required."
+  exit 2
+}
 
 # Ensure session-manager-plugin is present (needed for ecs execute-command)
 if ! need_bin session-manager-plugin; then
@@ -65,7 +92,8 @@ fi
 
 # Helper: choose from list with fzf if available, else numbered select
 choose_item() {
-  local prompt="$1"; shift
+  local prompt="$1"
+  shift
   if need_bin fzf; then
     printf "%s\n" "$@" | fzf --prompt="$prompt> " --height=15 --border
   else
