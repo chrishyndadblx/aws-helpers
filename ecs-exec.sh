@@ -3,18 +3,21 @@ set -euo pipefail
 
 # ecs-exec.sh — interactively exec into an ECS task's 'web' container
 # Usage:
-#   ./ecs-exec.sh --profile <profile> [--region <region>] [--cluster <name-or-arn>] [--task <task-arn>] [--shell </bin/sh|/bin/bash>]
+#   ./ecs-exec.sh [--profile <profile>] [--region <region>] [--cluster <name-or-arn>] [--task <task-arn>] [--shell </bin/sh|/bin/bash>]
 #
 # Notes:
 # - Container name defaults to 'web' (override with --container if you really need to).
-# - If --cluster or --task is omitted, you'll be prompted to select from what's available.
+# - If --profile, --cluster, or --task is omitted, you'll be prompted to select from what's available.
 # - Requires: aws CLI v2, session-manager-plugin, jq. Optional: fzf for nicer selection.
 #
 # Exit codes:
 #   1 - user/config error, 2 - dependency missing, 3 - AWS call failed
 
 err() { echo "ERROR: $*" >&2; }
-die() { err "$@"; exit 1; }
+die() {
+  err "$@"
+  exit 1
+}
 
 need_bin() {
   command -v "$1" >/dev/null 2>&1 || return 1
@@ -26,30 +29,53 @@ REGION=""
 CLUSTER=""
 TASK=""
 CONTAINER="web"
-SHELL="/bin/sh"
+SHELL="/bin/bash"
 
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile) PROFILE="${2:-}"; shift 2;;
-    --region) REGION="${2:-}"; shift 2;;
-    --cluster) CLUSTER="${2:-}"; shift 2;;
-    --task) TASK="${2:-}"; shift 2;;
-    --container) CONTAINER="${2:-}"; shift 2;;
-    --shell) SHELL="${2:-}"; shift 2;;
-    -h|--help)
-      sed -n '1,40p' "$0"
-      exit 0
-      ;;
-    *)
-      die "Unknown arg: $1"
-      ;;
+  --profile)
+    PROFILE="${2:-}"
+    shift 2
+    ;;
+  --region)
+    REGION="${2:-}"
+    shift 2
+    ;;
+  --cluster)
+    CLUSTER="${2:-}"
+    shift 2
+    ;;
+  --task)
+    TASK="${2:-}"
+    shift 2
+    ;;
+  --container)
+    CONTAINER="${2:-}"
+    shift 2
+    ;;
+  --shell)
+    SHELL="${2:-}"
+    shift 2
+    ;;
+  -h | --help)
+    sed -n '1,40p' "$0"
+    exit 0
+    ;;
+  *)
+    die "Unknown arg: $1"
+    ;;
   esac
 done
 
-[[ -n "$PROFILE" ]] || die "Provide --profile <name> (SSO or static profile)."
-need_bin aws || { err "aws CLI v2 is required."; exit 2; }
-need_bin jq  || { err "jq is required."; exit 2; }
+need_bin aws || {
+  err "aws CLI v2 is required."
+  exit 2
+}
+need_bin jq || {
+  err "jq is required."
+  exit 2
+}
 
 # Ensure session-manager-plugin is present (needed for ecs execute-command)
 if ! need_bin session-manager-plugin; then
@@ -57,15 +83,10 @@ if ! need_bin session-manager-plugin; then
   exit 2
 fi
 
-# If region not provided, read from profile config
-if [[ -z "${REGION}" ]]; then
-  REGION="$(aws configure get region --profile "$PROFILE" || true)"
-fi
-[[ -n "$REGION" ]] || die "No region set. Use --region or set region in the profile."
-
 # Helper: choose from list with fzf if available, else numbered select
 choose_item() {
-  local prompt="$1"; shift
+  local prompt="$1"
+  shift
   if need_bin fzf; then
     printf "%s\n" "$@" | fzf --prompt="$prompt> " --height=15 --border
   else
@@ -81,6 +102,23 @@ choose_item() {
     done
   fi
 }
+
+# Resolve profile if not provided
+if [[ -z "$PROFILE" ]]; then
+  profiles=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && profiles+=("$line")
+  done < <(aws configure list-profiles 2>/dev/null)
+  [[ ${#profiles[@]} -gt 0 ]] || die "No AWS profiles found. Configure one with 'aws configure' or 'aws configure sso'."
+  PROFILE="$(choose_item "Select profile" "${profiles[@]}")"
+  [[ -n "$PROFILE" ]] || die "No profile selected."
+fi
+
+# If region not provided, read from profile config
+if [[ -z "${REGION}" ]]; then
+  REGION="$(aws configure get region --profile "$PROFILE" || true)"
+fi
+[[ -n "$REGION" ]] || die "No region set. Use --region or set region in the profile."
 
 # Normalize cluster input: accept name or ARN; return name for CLI calls or keep as is
 normalize_cluster() {
