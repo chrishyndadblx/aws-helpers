@@ -3,11 +3,11 @@ set -euo pipefail
 
 # ecs-exec.sh — interactively exec into an ECS task's 'web' container
 # Usage:
-#   ./ecs-exec.sh --profile <profile> [--region <region>] [--cluster <name-or-arn>] [--task <task-arn>] [--shell </bin/sh|/bin/bash>]
+#   ./ecs-exec.sh [--profile <profile>] [--region <region>] [--cluster <name-or-arn>] [--task <task-arn>] [--shell </bin/sh|/bin/bash>]
 #
 # Notes:
 # - Container name defaults to 'web' (override with --container if you really need to).
-# - If --cluster or --task is omitted, you'll be prompted to select from what's available.
+# - If --profile, --cluster, or --task is omitted, you'll be prompted to select from what's available.
 # - Requires: aws CLI v2, session-manager-plugin, jq. Optional: fzf for nicer selection.
 #
 # Exit codes:
@@ -68,7 +68,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$PROFILE" ]] || die "Provide --profile <name> (SSO or static profile)."
 need_bin aws || {
   err "aws CLI v2 is required."
   exit 2
@@ -83,12 +82,6 @@ if ! need_bin session-manager-plugin; then
   err "session-manager-plugin is required for ECS Exec. Install it and retry."
   exit 2
 fi
-
-# If region not provided, read from profile config
-if [[ -z "${REGION}" ]]; then
-  REGION="$(aws configure get region --profile "$PROFILE" || true)"
-fi
-[[ -n "$REGION" ]] || die "No region set. Use --region or set region in the profile."
 
 # Helper: choose from list with fzf if available, else numbered select
 choose_item() {
@@ -109,6 +102,23 @@ choose_item() {
     done
   fi
 }
+
+# Resolve profile if not provided
+if [[ -z "$PROFILE" ]]; then
+  profiles=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && profiles+=("$line")
+  done < <(aws configure list-profiles 2>/dev/null)
+  [[ ${#profiles[@]} -gt 0 ]] || die "No AWS profiles found. Configure one with 'aws configure' or 'aws configure sso'."
+  PROFILE="$(choose_item "Select profile" "${profiles[@]}")"
+  [[ -n "$PROFILE" ]] || die "No profile selected."
+fi
+
+# If region not provided, read from profile config
+if [[ -z "${REGION}" ]]; then
+  REGION="$(aws configure get region --profile "$PROFILE" || true)"
+fi
+[[ -n "$REGION" ]] || die "No region set. Use --region or set region in the profile."
 
 # Normalize cluster input: accept name or ARN; return name for CLI calls or keep as is
 normalize_cluster() {
