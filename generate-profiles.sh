@@ -52,11 +52,37 @@ if [[ -z "${TOKEN:-}" ]]; then
   exit 1
 fi
 
-# Backup and start from current config
+# Backup and start from current config, stripping any profile blocks
+# this script previously generated (identified by sso_session = $SESSION_NAME).
+# Manually-curated profiles and the [sso-session ...] block are preserved.
 cp "$CONFIG" "$BACKUP"
 echo "Backed up existing config to $BACKUP"
 TMP="$(mktemp)"
-cat "$BACKUP" > "$TMP"
+awk -v session="$SESSION_NAME" '
+  function flush() {
+    if (in_profile && keep) printf "%s", buf
+    in_profile = 0; buf = ""; keep = 1
+  }
+  /^\[profile / {
+    flush()
+    in_profile = 1; buf = $0 "\n"; keep = 1
+    next
+  }
+  /^\[/ {
+    flush()
+    print
+    next
+  }
+  {
+    if (in_profile) {
+      buf = buf $0 "\n"
+      if ($1 == "sso_session" && $3 == session) keep = 0
+    } else {
+      print
+    }
+  }
+  END { flush() }
+' "$BACKUP" > "$TMP"
 
 sanitize() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//; s/-*$//'
